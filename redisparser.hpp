@@ -17,6 +17,7 @@
 #define __FANNY_redisparser_H__
 #include <vector>
 #include <boost/lexical_cast.hpp>
+#include <boost/variant.hpp>
 
 
 namespace RedisParseSpace{
@@ -31,7 +32,17 @@ namespace RedisParseSpace{
   const std::string  REDIS_PREFIX_INT_REPLY(":");
   const std::string  REDIS_PREFIX_LBR("\n");
   const std::string  REDIS_WHITESPACE(" \f\n\r\t\v");
-  const std::string  REDIS_MISSING("**missing-key**");
+  
+
+  inline std::string makeCommand( const std::vector<std::string>& args) {
+    std::ostringstream oss;
+    oss << REDIS_PREFIX_MULTI_BULK_REPLY << args.size() << REDIS_LBR;
+    for(auto& param : args) {
+      oss << REDIS_PREFIX_SINGLE_BULK_REPLY << param.size() << REDIS_LBR;
+      oss << param << REDIS_LBR;
+    }
+    return oss.str();
+  }
 
 
   enum reply_t : unsigned int {
@@ -42,6 +53,8 @@ namespace RedisParseSpace{
     bulk_reply,
     multi_bulk_reply
   };
+
+  typedef boost::variant<int, std::string, void*> RedisData;
 
   inline reply_t getReplyType(const std::string& str) {
     if(0 == str.find_first_of(REDIS_PREFIX_STATUS_REPLY_ERR_C)) {
@@ -107,6 +120,7 @@ namespace RedisParseSpace{
        if(!m_done) {parseBule(buf, size, readPos);}
        return m_done;
      }
+     const std::vector<RedisData>& result() const { return m_recvList; }
    private:
      bool parseType(const char* buf, size_t size, size_t& readPos) {
        std::string content;
@@ -126,14 +140,14 @@ namespace RedisParseSpace{
          m_done = true;
        }break;
        case int_reply: {
-         m_recvList.push_back(content.substr(1)); //":"
+         m_recvList.push_back(boost::lexical_cast<int>(content.substr(1))); //":"
          m_done = true;
        }break;
        case bulk_reply: {
          m_tempMaxLen = 0;
          int bulkLen = boost::lexical_cast<int>(content.substr(1));   //"$"
          if(-1 == bulkLen) {
-           m_recvList.push_back(REDIS_MISSING);
+           m_recvList.push_back(nullptr);
            m_done = true;
          } else { 
            m_tempMaxLen = bulkLen + 2;   // "CRLF"
@@ -175,7 +189,7 @@ namespace RedisParseSpace{
            const std::string& ssub = content.substr(1);   //"$"
            int bulkLen = boost::lexical_cast<int>(ssub);
            if(-1 == bulkLen) {
-             m_recvList.push_back(REDIS_MISSING);
+             m_recvList.push_back(nullptr);
            } else {
              m_tempMaxLen = bulkLen + 2; // "CRLF"
              content.clear();
@@ -230,12 +244,9 @@ namespace RedisParseSpace{
      size_t m_multiCount = 0;
      size_t m_tempMaxLen = 0;
      std::string m_temp;
-     std::vector<std::string> m_recvList;
+     std::vector<RedisData> m_recvList;
      bool m_done = false;
    private:
-//      RedisParse(const RedisParse&) = delete;
-//      RedisParse& operator = (const RedisParse&) = delete;
-//      RedisParse& operator = (RedisParse&&) = delete;
    };
 
 }
